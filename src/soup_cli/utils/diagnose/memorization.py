@@ -9,6 +9,7 @@ Score = 1 - mean(echo_rate) so 1.0 = healthy / no echo.
 from __future__ import annotations
 
 from collections import Counter
+import unicodedata
 from typing import Mapping, Optional, Sequence
 
 from soup_cli.utils.diagnose._common import (
@@ -100,39 +101,52 @@ def score_memorization(
     def _overlap_tokens(value: str) -> list:
         if tok is not None:
             sub = subword_tokens(tok, value)
-            if len(sub) >= 2:
-                return list(zip(sub[:-1], sub[1:]))
-            return sub
-        words = tokenize(value)
-        return list(zip(words[:-1], words[1:])) if len(words) >= 2 else words
+        else:
+            sub = tokenize(value)
+
+        if not sub:
+            sub = [c for c in value if unicodedata.category(c).startswith(('S', 'P'))]
+
+        if len(sub) >= 2:
+            return list(zip(sub[:-1], sub[1:]))
+        return sub
 
     echoes = []
     scanned = 0
+    skipped_no_tokens = 0
+
     for row in training_rows:
         text = extract_row_text(row)
         if not text:
             continue
-        # Reuse the once-resolved tokenizer (no per-row re-resolution).
+
         prefix, suffix = _split_with_resolved(text, prefix_fraction, tok)
         if not suffix:
             continue
+
+        tok_suff = _overlap_tokens(suffix)
+        if not tok_suff:
+            skipped_no_tokens += 1
+            continue
+
         scanned += 1
         completion = call_generator(adapter_gen, prefix)
         tok_comp = _overlap_tokens(completion)
-        tok_suff = _overlap_tokens(suffix)
-        if not tok_comp or not tok_suff:
+
+        if not tok_comp:
             overlap = 0.0
         else:
-            # A live completion is capped, while the held-out suffix is not.
-            # Completion precision detects reproduced suffix spans without
-            # diluting the score as the untouched suffix grows.
             completion_counts = Counter(tok_comp)
             suffix_counts = Counter(tok_suff)
             matched = sum((completion_counts & suffix_counts).values())
             overlap = matched / len(tok_comp)
+
         echoes.append(1.0 if overlap >= echo_threshold else 0.0)
         if scanned >= 1000:
             break
+
+    if skipped_no_tokens > 0:
+        print(f"Skipped {skipped_no_tokens} row(s) whose suffix has no valid tokens.")
     if not echoes:
         return FailureScore(
             mode="memorization",
