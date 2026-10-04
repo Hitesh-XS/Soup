@@ -64,8 +64,12 @@ SYMBOL_ONLY = {
 def test_symbol_only_answers_read_in_both_directions(kind: str) -> None:
     answers = SYMBOL_ONLY[kind]
     assert _collapse(answers)[0] == "OK"
-    if kind != "punctuation":
-        assert _collapse([answers[0]] * 4)[0] == "MAJOR"
+    assert _collapse([answers[0]] * 4)[0] == "MAJOR"
+
+
+def test_a_model_that_mostly_answers_dots_is_not_read_as_diverse() -> None:
+    answers = ["...", "...", "...", "the model finally says something useful"]
+    assert _collapse(answers)[0] == "MAJOR"
 
 
 @pytest.mark.parametrize(
@@ -82,11 +86,46 @@ def test_answers_with_no_evidence_return_a_valid_score(answers: list) -> None:
     assert verdict in {"OK", "NOT_RUN"} and 0.0 <= score <= 1.0
 
 
-def test_memorization_reports_skipped_rows_in_the_evidence_not_on_stdout(capsys) -> None:
-    rows = [
-        {"text": "alpha beta gamma delta epsilon zeta eta theta"},
-        {"text": "start of row it is a"},
-    ]
-    result = score_memorization(rows, lambda prefix: "unrelated words entirely")
+SCORED_ROW = {"text": "alpha beta gamma delta epsilon zeta eta theta"}
+STOPWORD_SUFFIX_ROW = {"text": "alpha beta gamma delta epsilon zeta it is a to of the and"}
+
+
+def test_memorization_skips_a_row_whose_suffix_has_no_tokens_and_counts_it(capsys) -> None:
+    result = score_memorization(
+        [SCORED_ROW, STOPWORD_SUFFIX_ROW],
+        lambda prefix: "unrelated words entirely",
+        prefix_fraction=0.5,
+    )
     assert capsys.readouterr().out == ""
-    assert "skipped" in result.evidence
+    assert "scanned=1 " in result.evidence, result.evidence
+    assert "skipped_no_tokens=1 " in result.evidence, result.evidence
+
+
+def test_memorization_with_every_row_skipped_says_so() -> None:
+    result = score_memorization(
+        [STOPWORD_SUFFIX_ROW], lambda prefix: "it is a to", prefix_fraction=0.5
+    )
+    assert result.verdict == "OK"
+    assert "scanned=0 " in result.evidence and "skipped_no_tokens=1 " in result.evidence
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        "... ?! *** --- !!! ???",
+        "\U0001F44D \U0001F600 \U0001F680 \U0001F44D \U0001F600 \U0001F680",
+    ],
+    ids=["punctuation", "emoji"],
+)
+def test_memorization_scores_an_exact_echo_of_a_symbol_only_suffix(suffix: str) -> None:
+    row = {"text": "alpha beta gamma delta epsilon zeta " + suffix}
+    result = score_memorization([row], lambda prefix: suffix, prefix_fraction=0.5)
+    assert result.verdict == "MAJOR", result.evidence
+
+
+def test_memorization_does_not_score_a_latin_stopword_suffix_by_its_punctuation() -> None:
+    row = {"text": "alpha beta gamma delta epsilon zeta it is a. to of! the."}
+    result = score_memorization(
+        [row], lambda prefix: "it is a. to of! the.", prefix_fraction=0.5
+    )
+    assert "skipped_no_tokens=1" in result.evidence, result.evidence

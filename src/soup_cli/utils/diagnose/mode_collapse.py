@@ -41,7 +41,7 @@ def _pairwise_diversity(samples: Sequence[str], *, n: int = 3) -> float | None:
             tokens = [
                 ch
                 for ch in sample
-                if unicodedata.category(ch)[0] == "S"
+                if unicodedata.category(ch)[0] in "SP"
             ]
 
         cleaned.append(tokens)

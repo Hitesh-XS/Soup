@@ -110,7 +110,7 @@ def score_memorization(
             sub = [
                 ch
                 for ch in value
-                if unicodedata.category(ch)[0] == "S"
+                if unicodedata.category(ch)[0] in "SP"
             ]
 
         if len(sub) >= 2:
@@ -128,7 +128,6 @@ def score_memorization(
             continue
 
         # Reuse the once-resolved tokenizer (no per-row re-resolution).
-
         prefix, suffix = _split_with_resolved(text, prefix_fraction, tok)
         if not suffix:
             continue
@@ -146,6 +145,8 @@ def score_memorization(
         if not tok_comp:
             overlap = 0.0
         else:
+            # Completion precision detects reproduced suffix spans without
+            # diluting the score as the untouched suffix grows.
             completion_counts = Counter(tok_comp)
             suffix_counts = Counter(tok_suff)
             matched = sum((completion_counts & suffix_counts).values())
@@ -164,7 +165,7 @@ def score_memorization(
                 {
                     "scanned": scanned,
                     "skipped_no_tokens": skipped_no_tokens,
-                    "status": "no rows with text+suffix; nothing to check",
+                    "status": "no rows had a suffix with tokens; nothing to check",
                 }
             ),
         )
