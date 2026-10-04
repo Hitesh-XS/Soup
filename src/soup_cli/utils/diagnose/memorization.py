@@ -8,8 +8,8 @@ Score = 1 - mean(echo_rate) so 1.0 = healthy / no echo.
 
 from __future__ import annotations
 
-from collections import Counter
 import unicodedata
+from collections import Counter
 from typing import Mapping, Optional, Sequence
 
 from soup_cli.utils.diagnose._common import (
@@ -104,11 +104,18 @@ def score_memorization(
         else:
             sub = tokenize(value)
 
-        if not sub:
-            sub = [c for c in value if unicodedata.category(c).startswith(('S', 'P'))]
+        has_word = any(unicodedata.category(ch)[0] in "LMN" for ch in value)
+
+        if not sub and not has_word:
+            sub = [
+                ch
+                for ch in value
+                if unicodedata.category(ch)[0] == "S"
+            ]
 
         if len(sub) >= 2:
             return list(zip(sub[:-1], sub[1:]))
+
         return sub
 
     echoes = []
@@ -120,6 +127,8 @@ def score_memorization(
         if not text:
             continue
 
+        # Reuse the once-resolved tokenizer (no per-row re-resolution).
+
         prefix, suffix = _split_with_resolved(text, prefix_fraction, tok)
         if not suffix:
             continue
@@ -130,6 +139,7 @@ def score_memorization(
             continue
 
         scanned += 1
+        # A live completion is capped, while the held-out suffix is not.
         completion = call_generator(adapter_gen, prefix)
         tok_comp = _overlap_tokens(completion)
 
@@ -145,21 +155,27 @@ def score_memorization(
         if scanned >= 1000:
             break
 
-    if skipped_no_tokens > 0:
-        print(f"Skipped {skipped_no_tokens} row(s) whose suffix has no valid tokens.")
     if not echoes:
         return FailureScore(
             mode="memorization",
             score=1.0,
             verdict="OK",
-            evidence="no rows with text+suffix; nothing to check",
+            evidence=merge_evidence(
+                {
+                    "scanned": scanned,
+                    "skipped_no_tokens": skipped_no_tokens,
+                    "status": "no rows with text+suffix; nothing to check",
+                }
+            ),
         )
+
     echo_rate = sum(echoes) / len(echoes)
     score = max(0.0, min(1.0, 1.0 - echo_rate))
     verdict = classify_score(score)
     evidence = merge_evidence(
         {
             "scanned": scanned,
+            "skipped_no_tokens": skipped_no_tokens,
             "echo_rate": echo_rate,
             "threshold": echo_threshold,
             "prefix_fraction": prefix_fraction,

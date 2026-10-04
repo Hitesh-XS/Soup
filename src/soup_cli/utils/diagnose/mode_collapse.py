@@ -8,8 +8,9 @@ nltk).
 
 from __future__ import annotations
 
-from typing import Callable, Sequence
 import unicodedata
+from typing import Callable, Sequence
+
 from soup_cli.utils.diagnose._common import (
     jaccard,
     merge_evidence,
@@ -27,27 +28,39 @@ MultiGen = Callable[[str, int], Sequence[str]]
 def _pairwise_diversity(samples: Sequence[str], *, n: int = 3) -> float | None:
     """1 - average pairwise n-gram-set Jaccard; 1.0 = fully diverse."""
     cleaned = []
+    evidence = []
+
     for sample in samples:
         if not isinstance(sample, str):
             continue
+
         tokens = tokenize(sample)
-        # Fallback to symbols/punctuation if no word tokens are found
-        if not tokens:
-            tokens = [c for c in sample if unicodedata.category(c).startswith(('S', 'P'))]
+        has_word = any(unicodedata.category(ch)[0] in "LMN" for ch in sample)
+
+        if not tokens and not has_word:
+            tokens = [
+                ch
+                for ch in sample
+                if unicodedata.category(ch)[0] == "S"
+            ]
+
         cleaned.append(tokens)
+        evidence.append(bool(tokens) or has_word)
 
     if len(cleaned) < 2:
         return None
 
     pairs = 0
     overlap = 0.0
+
     for i in range(len(cleaned)):
         for j in range(i + 1, len(cleaned)):
-            # Skip pair if both have no tokens
-            if not cleaned[i] and not cleaned[j]:
+            if not evidence[i] and not evidence[j]:
                 continue
+
             a = ngrams(cleaned[i], n) or [tuple(cleaned[i])]
             b = ngrams(cleaned[j], n) or [tuple(cleaned[j])]
+
             overlap += jaccard(a, b)
             pairs += 1
 
@@ -98,9 +111,9 @@ def score_mode_collapse(
     if not diversities:
         return FailureScore(
             mode="mode_collapse",
-            score=0.5,
+            score=1.0,
             verdict="OK",
-            evidence="Neutral: No token evidence in any answer pair",
+            evidence="no token evidence in any answer pair; nothing to check",
         )
 
     score = sum(diversities) / len(diversities)
