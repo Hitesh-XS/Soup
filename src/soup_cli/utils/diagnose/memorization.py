@@ -104,7 +104,7 @@ def score_memorization(
         else:
             sub = tokenize(value)
 
-        has_word = any(unicodedata.category(ch)[0] in "LMN" for ch in value)
+        has_word = any(unicodedata.category(ch)[0] in "LN" for ch in value)
 
         if not sub and not has_word:
             sub = [

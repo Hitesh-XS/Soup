@@ -35,7 +35,7 @@ def _pairwise_diversity(samples: Sequence[str], *, n: int = 3) -> float | None:
             continue
 
         tokens = tokenize(sample)
-        has_word = any(unicodedata.category(ch)[0] in "LMN" for ch in sample)
+        has_word = any(unicodedata.category(ch)[0] in "LN" for ch in sample)
 
         if not tokens and not has_word:
             tokens = [

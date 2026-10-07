@@ -129,3 +129,25 @@ def test_memorization_does_not_score_a_latin_stopword_suffix_by_its_punctuation(
         [row], lambda prefix: "it is a. to of! the.", prefix_fraction=0.5
     )
     assert "skipped_no_tokens=1" in result.evidence, result.evidence
+VARIATION_SELECTOR = chr(0xFE0F)
+EMOJI_WITH_SELECTOR = [chr(cp) + VARIATION_SELECTOR for cp in (0x2764, 0x2600, 0x270C, 0x26A0)]
+
+
+def test_emoji_with_a_variation_selector_read_in_both_directions() -> None:
+    assert _collapse(EMOJI_WITH_SELECTOR)[0] == "OK"
+    assert _collapse([EMOJI_WITH_SELECTOR[0]] * 4)[0] == "MAJOR"
+
+
+def test_memorization_scores_an_exact_echo_of_emoji_with_a_variation_selector() -> None:
+    suffix = " ".join(EMOJI_WITH_SELECTOR + EMOJI_WITH_SELECTOR[:2])
+    row = {"text": "alpha beta gamma delta epsilon zeta " + suffix}
+    result = score_memorization([row], lambda prefix: suffix, prefix_fraction=0.5)
+    assert result.verdict == "MAJOR", result.evidence
+
+
+def test_a_prompt_with_no_token_evidence_does_not_dilute_the_mean() -> None:
+    def answers(prompt: str, k: int) -> list:
+        return [""] * k if prompt == "empty" else ["the same four words"] * k
+
+    result = score_mode_collapse(["empty", "collapsed"], answers, k=4)
+    assert result.score == 0.0, result.evidence
