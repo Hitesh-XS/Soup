@@ -1144,14 +1144,16 @@ def train(
             plan_func = getattr(cloud_mod, f"plan_{cloud}_run", None)
             if plan_func is None:
                 raise ValueError(f"cloud backend {cloud!r} has no plan function")
-            plan = plan_func(
-                str(config_path),
-                gpu=gpu,
-                output_dir=cfg.output,
-                soup_version=_soup_version,
-                config_yaml=effective_yaml,
-                local_train_inputs=local_train_inputs,
-            )
+            plan_kwargs = {
+                "gpu": gpu,
+                "output_dir": cfg.output,
+                "soup_version": _soup_version,
+            }
+            if cloud in {"lambda", "modal"}:
+                plan_kwargs["config_yaml"] = effective_yaml
+                plan_kwargs["local_train_inputs"] = local_train_inputs
+
+            plan = plan_func(str(config_path), **plan_kwargs)
             stub_realpath = cloud_mod.write_stub(plan)
         except (ValueError, TypeError) as exc:
             console.print(f"[red]Cloud plan failed:[/] {markup_escape(str(exc))}")

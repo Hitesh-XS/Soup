@@ -157,7 +157,6 @@ def render_modal_stub(
         "Run with: modal run soup_modal_app.py\n"
         '(authenticate once with `modal setup`).\n"""\n'
         "import base64\n"
-        "import os\n"
         "import pathlib\n"
         "import re\n"
         "import stat\n"
@@ -250,7 +249,7 @@ def render_modal_stub(
         "    for item in _LOCAL_TRAIN_INPUTS:\n"
         "        source = item['local_path']\n"
         "        try:\n"
-        "            info = os.lstat(source)\n"
+        "            info = pathlib.Path(source).lstat()\n"
         "        except OSError as exc:\n"
         "            raise RuntimeError(\n"
         "                f'local training input is unavailable: {source}: {exc}'\n"

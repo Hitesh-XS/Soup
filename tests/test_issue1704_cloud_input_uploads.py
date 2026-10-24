@@ -101,7 +101,8 @@ def test_modal_upload_uses_expected_remote_path(tmp_path, monkeypatch):
     assert calls[0][-1] == "/test-run/inputs/train-0.jsonl"
 
 
-def test_lambda_upload_failure_does_not_mark_inputs_ready(tmp_path):
+
+def test_lambda_upload_failure_does_not_mark_inputs_ready(tmp_path, monkeypatch):
     manifest = _manifest(tmp_path)
     source = render_lambda_stub(
         "data:\n  train: inputs/train-0.jsonl\n",
@@ -119,19 +120,24 @@ def test_lambda_upload_failure_does_not_mark_inputs_ready(tmp_path):
             return subprocess.CompletedProcess(command, 1, "", "upload failed")
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    namespace["subprocess"].run = fake_run
+    monkeypatch.setattr(namespace["subprocess"], "run", fake_run)
+
     clock = iter([10_000, 10_000_000])
-    namespace["time"].monotonic = lambda: next(clock, 10_000_000)
-    namespace["time"].sleep = lambda _: None
+    monkeypatch.setattr(
+        namespace["time"], "monotonic", lambda: next(clock, 10_000_000)
+    )
+    monkeypatch.setattr(namespace["time"], "sleep", lambda _: None)
 
     with pytest.raises(RuntimeError, match="uploading local training input"):
         namespace["_upload_local_train_inputs"]("127.0.0.1", [])
 
     assert any(command[0] == "scp" for command in commands)
     assert not any(
-        command[0] == "ssh" and "touch /home/ubuntu/soup/inputs-ready" in command
+        command[0] == "ssh"
+        and "touch /home/ubuntu/soup/inputs-ready" in command
         for command in commands
     )
+
 
 def test_lambda_upload_retries_until_ssh_is_available(tmp_path, monkeypatch):
     manifest = _manifest(tmp_path)
