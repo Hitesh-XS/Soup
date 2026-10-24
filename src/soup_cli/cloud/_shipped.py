@@ -138,18 +138,11 @@ def _path_field_is_local(value: str) -> bool:
 def unshipped_inputs(cfg: "SoupConfig") -> List[str]:
     """Dotted paths whose local file the stub would not carry, sorted.
 
-    data.train may be a single entry or a list, and each is classified
-    separately: a Hub id in the list is fine and a ./data file beside it is
-    not, so the whole field cannot be judged by its first entry. Every other
-    field is walked as a dotted schema path so a list or a comma-separated
-    value is judged entry by entry.
+    data.train is validated by its own validator. Every other field is
+    walked as a dotted schema path so a list or a comma-separated value
+    is judged entry by entry.
     """
     found: List[str] = []
-    train = getattr(getattr(cfg, "data", None), "train", None)
-    if train is not None:
-        entries = [train] if isinstance(train, str) else list(train or [])
-        if any(_train_entry_is_local(e) for e in entries if isinstance(e, str)):
-            found.append("data.train")
 
     for dotted in _PATH_FIELDS:
         value = _resolve_plan_input(cfg, dotted)

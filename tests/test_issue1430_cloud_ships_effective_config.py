@@ -22,6 +22,10 @@ import yaml
 from typer.testing import CliRunner
 
 from soup_cli.cli import app
+from soup_cli.cloud._local_inputs import (
+    _MAX_LOCAL_TRAIN_INPUT_BYTES,
+    prepare_local_train_inputs,
+)
 from soup_cli.config.loader import load_config
 from tests.conftest import strip_ansi
 
@@ -68,13 +72,21 @@ def _plan(cloud, *extra):
 
 
 @pytest.mark.parametrize("cloud", CLOUDS)
-def test_a_local_data_file_stops_the_plan_instead_of_the_paid_run(chat_config, cloud):
-    """The default `soup init` then `--cloud` flow always hit this."""
+def test_a_local_data_file_is_shipped_in_the_plan(chat_config, cloud):
+    """Local training data is declared and rewritten for the remote run."""
     result = _plan(cloud)
 
-    assert result.exit_code != 0, result.output
-    assert "data.train" in strip_ansi(result.output), strip_ansi(result.output)
-    assert not Path(f"soup_{cloud}_app.py").exists(), "a stub was rendered anyway"
+    assert result.exit_code == 0, result.output
+
+    stub = Path(f"soup_{cloud}_app.py")
+    assert stub.exists()
+
+    shipped = "\n".join(_shipped_configs(stub))
+    assert "inputs/train-0.jsonl" in shipped, shipped
+
+    stub_text = stub.read_text(encoding="utf-8")
+    assert "train-0.jsonl" in stub_text
+    assert "local training input" in stub_text.lower()
 
 
 @pytest.mark.parametrize("cloud", CLOUDS)
@@ -215,20 +227,23 @@ class TestUnshippedInputs:
 
         assert unshipped_inputs(self._cfg()) == []
 
-    def test_a_local_path_is_unshipped(self):
+    def test_a_local_path_is_not_unshipped(self):
         from soup_cli.cloud._shipped import unshipped_inputs
 
-        assert unshipped_inputs(self._cfg("./data/train.jsonl")) == ["data.train"]
+        assert unshipped_inputs(self._cfg("./data/train.jsonl")) == []
 
     def test_a_list_is_judged_entry_by_entry(self):
-        """A Hub id beside a local file is still a local file."""
+        """Local files are handled separately from unsupported inputs."""
         from soup_cli.cloud._shipped import unshipped_inputs
 
         cfg = self._cfg()
         cfg.data.train = ["teknium/OpenHermes-2.5", "./data/train.jsonl"]
-        assert unshipped_inputs(cfg) == ["data.train"]
+        assert unshipped_inputs(cfg) == []
 
-        cfg.data.train = ["teknium/OpenHermes-2.5", "mlfoundations/dclm-baseline-1.0"]
+        cfg.data.train = [
+            "teknium/OpenHermes-2.5",
+            "mlfoundations/dclm-baseline-1.0",
+        ]
         assert unshipped_inputs(cfg) == []
 
     def test_a_remote_uri_is_not_unshipped(self):
@@ -332,5 +347,114 @@ class TestUnshippedInputs:
     def test_the_message_names_the_escape_hatch(self):
         from soup_cli.cloud._shipped import refuse_unshipped_inputs
 
-        with pytest.raises(ValueError, match="Hub dataset id"):
-            refuse_unshipped_inputs(self._cfg("./data/train.jsonl"))
+        cfg = self._cfg()
+        cfg.data.image_dir = "./images"
+
+        with pytest.raises(ValueError, match="data.image_dir"):
+            refuse_unshipped_inputs(cfg)
+
+
+def test_local_train_input_rejects_missing_file(chat_config):
+    cfg = load_config(chat_config)
+    cfg.data.train = "data/missing.jsonl"
+
+    with pytest.raises(ValueError, match=r"data\.train\[0\].*does not exist"):
+        prepare_local_train_inputs(cfg)
+
+
+def test_local_train_input_rejects_file_outside_working_directory(
+    chat_config, tmp_path
+):
+    cfg = load_config(chat_config)
+    outside = tmp_path.parent / "outside.jsonl"
+    outside.write_text('{"text": "outside"}\n', encoding="utf-8")
+    cfg.data.train = str(outside)
+
+    with pytest.raises(ValueError, match="inside the working directory"):
+        prepare_local_train_inputs(cfg, cwd=str(tmp_path))
+
+
+def test_local_train_input_enforces_fixed_256_mib_limit():
+    assert _MAX_LOCAL_TRAIN_INPUT_BYTES == 256 * 1024 * 1024
+
+
+def test_local_train_input_rejects_aggregate_size_over_limit(
+    chat_config, monkeypatch
+):
+    from soup_cli.cloud import _local_inputs
+
+    monkeypatch.setattr(_local_inputs, "_MAX_LOCAL_TRAIN_INPUT_BYTES", 10)
+
+    data_dir = Path("data")
+    data_dir.mkdir(exist_ok=True)
+    first = data_dir / "first.jsonl"
+    second = data_dir / "second.jsonl"
+    first.write_bytes(b"123456")
+    second.write_bytes(b"12345")
+
+    cfg = load_config(chat_config)
+    cfg.data.train = ["data/first.jsonl", "data/second.jsonl"]
+
+    with pytest.raises(ValueError, match=r"total 11 bytes.*maximum allowed is 10 bytes"):
+        prepare_local_train_inputs(cfg)
+
+
+def test_local_train_inputs_get_deterministic_remote_paths(chat_config):
+    cfg = load_config(chat_config)
+    cfg.data.train = ["data/train.jsonl", "teknium/OpenHermes-2.5"]
+
+    manifest = prepare_local_train_inputs(cfg)
+
+    assert len(manifest) == 1
+    assert manifest[0].remote_path == "inputs/train-0.jsonl"
+    assert cfg.data.train == [
+        "inputs/train-0.jsonl",
+        "teknium/OpenHermes-2.5",
+    ]
+    assert manifest[0].size_bytes == Path("data/train.jsonl").stat().st_size
+
+
+def test_local_train_input_rejects_file_symlink(chat_config, tmp_path):
+    target = tmp_path / "data" / "train.jsonl"
+    link = tmp_path / "data" / "linked.jsonl"
+
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"Symlink creation is unavailable: {exc}")
+
+    cfg = load_config(chat_config)
+    cfg.data.train = "data/linked.jsonl"
+
+    with pytest.raises(ValueError, match="symlinks are not allowed"):
+        prepare_local_train_inputs(cfg)
+
+
+def test_local_train_input_rejects_symlinked_parent(chat_config, tmp_path):
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside.mkdir(exist_ok=True)
+    (outside / "train.jsonl").write_text('{"text": "test"}\n', encoding="utf-8")
+    link = tmp_path / "linked_data"
+
+    try:
+        link.symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"Directory symlink creation is unavailable: {exc}")
+
+    cfg = load_config(chat_config)
+    cfg.data.train = "linked_data/train.jsonl"
+
+    with pytest.raises(ValueError, match="symlinks are not allowed"):
+        prepare_local_train_inputs(cfg)
+
+def test_prepare_local_train_inputs_preserves_none():
+    from types import SimpleNamespace
+
+    from soup_cli.cloud._local_inputs import prepare_local_train_inputs
+
+    cfg = SimpleNamespace(data=SimpleNamespace(train=None))
+
+    manifest = prepare_local_train_inputs(cfg)
+
+    assert manifest == ()
+    assert cfg.data.train is None
