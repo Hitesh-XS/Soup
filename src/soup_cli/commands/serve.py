@@ -311,8 +311,8 @@ def serve(
         "--tool-auth-token",
         help=(
             "Require 'Authorization: Bearer <token>' on the code-exec tool "
-            "endpoints (/v1/tools/python, /v1/tools/web_search). Strongly "
-            "recommended whenever --host is not loopback, since those "
+            "endpoints (/v1/tools/python, /v1/tools/bash, /v1/tools/web_search). "
+            "Strongly recommended whenever --host is not loopback, since those "
             "endpoints run caller-supplied Python in a best-effort sandbox."
         ),
     ),
@@ -1340,7 +1340,7 @@ def _serve_sglang(
             )
         )
     console.print("[dim]Initializing SGLang runtime...[/]")
-    runtime, runtime_model_name = create_sglang_runtime(
+    runtime, runtime_model_name, lora_name = create_sglang_runtime(
         model_path=str(model_path),
         base_model=base_model,
         is_adapter=is_adapter,
@@ -1387,6 +1387,9 @@ def _serve_sglang(
         model_name=str(model_path.name),
         max_tokens_default=max_tokens_default,
         tokenizer=tokenizer,
+        # The name the adapter was registered under; every request has to name
+        # it, or SGLang answers from the base model (#1724).
+        lora_name=lora_name,
     )
 
     return app
@@ -1723,7 +1726,8 @@ def _create_app(
 
     Args:
         auth_token: optional Bearer-token gate for the v0.53.7 tool
-            endpoints (``/v1/tools/python`` + ``/v1/tools/web_search``).
+            endpoints (``/v1/tools/python``, ``/v1/tools/bash`` and
+            ``/v1/tools/web_search``).
             When ``None`` (default), endpoints inherit the server's
             loopback-only CORS trust boundary. When set, callers must
             supply ``Authorization: Bearer <token>``.
@@ -2312,10 +2316,22 @@ def _create_app(
             raise HTTPException(status_code=400, detail="Invalid request")
         if len(code) > tool_max_code_len:
             raise HTTPException(status_code=400, detail="Invalid request")
-        try:
-            from soup_cli.trainer.rewards import _run_code_sandbox
+        from soup_cli.trainer.rewards import (
+            SandboxIsolationError,
+            _get_isolation_strategy,
+            _run_code_sandbox,
+        )
 
-            stdout = _run_code_sandbox(code)
+        # Same requirement as /v1/tools/bash: run only where the host
+        # provides OS-level isolation (namespaces / sandbox-exec), and only
+        # when that isolation is actually set up for the run (strict).
+        isolation_detail = "python sandbox requires OS-level isolation"
+        if _get_isolation_strategy() == "best-effort":
+            raise HTTPException(status_code=501, detail=isolation_detail)
+        try:
+            stdout = _run_code_sandbox(code, strict_namespaces=True)
+        except SandboxIsolationError:
+            raise HTTPException(status_code=501, detail=isolation_detail)
         except Exception as exc:  # noqa: BLE001
             logger.debug("/v1/tools/python sandbox error: %s", exc)
             raise HTTPException(status_code=500, detail="Internal server error")

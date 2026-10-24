@@ -2,7 +2,7 @@
 
 [← Back to the Soup README](../README.md)
 
-> The OpenAI-compatible inference server, batch inference, benchmarking, merge/export (GGUF/ONNX/TensorRT/AWQ/GPTQ), the Anthropic Messages endpoint, speculative decoding, deploy autopilot, the Web UI, and Agent Forge.
+> The OpenAI-compatible inference server, batch inference, benchmarking, merge/export (GGUF/ONNX/TensorRT/BitNet/TorchAO), the Anthropic Messages endpoint, speculative decoding, deploy autopilot, the Web UI, and Agent Forge.
 
 **Contents:**
 
@@ -63,9 +63,77 @@ soup export --model ./merged --format gguf
 
 # Specify llama.cpp path manually
 soup export --model ./output --format gguf --llama-cpp /path/to/llama.cpp
+
+# Show the converter and quantizer's stdout/stderr while they run
+soup export --model ./output --format gguf --verbose
+
+# The environment manages its own conversion packages: never attempt pip
+soup export --model ./output --format gguf --no-install-deps --verbose
 ```
 
 Supported quantizations: `q4_0`, `q4_k_m`, `q5_k_m`, `q8_0`, `f16`, `f32`
+
+GGUF export prints phase lines for toolchain lookup, dependency checking, adapter
+merge when needed, conversion and quantization when needed. `--verbose` additionally
+streams the converter and quantizer's combined stdout/stderr as lines arrive; the
+child tool may buffer its own output. Without the flag, successful child-tool logs
+stay quiet. Both modes retain a failure summary; verbose mode keeps a bounded tail
+of the last 100 lines (up to 2,000 characters per line) for that summary.
+
+`--no-install-deps` checks `gguf`, `sentencepiece` and `protobuf` in Soup's Python
+environment and refuses with the missing package names before merging an adapter
+or cloning/running the toolchain. It never runs pip. Install the packages through
+your environment manager and retry. This flag does not disable toolchain lookup or
+cloning; use `--llama-cpp` to supply your own checkout. Both new flags apply only to
+`--format gguf`; other formats refuse them rather than ignore them.
+
+### MTP checkpoint inspection
+
+When a model declares `mtp_num_hidden_layers` but its saved safetensors headers
+contain no `mtp.*` or `model.mtp.*` tensors, Soup passes `--no-mtp` to conversion
+(including the f16 intermediate for quantized exports). It reads headers only,
+including indexed shards, and leaves the model/config unchanged. Actual MTP tensors
+are preserved. Malformed or missing checkpoint metadata is refused rather than
+treated as absent weights. The selected converter must advertise `--no-mtp` in a
+successful `--help` probe; otherwise choose a compatible checkout with
+`--llama-cpp`. The default `b5270` pin does not support this flag.
+The shared safetensors header reader currently refuses unsupported dtypes such as
+`F8_E4M3`; this inspection can therefore refuse an FP8 checkpoint even when its MTP
+tensors are present.
+
+### Converter compatibility
+
+For a fresh default auto-clone, Soup checks the effective text architecture in
+`config.json` against capability data generated from the exact `b5270` converter.
+`text_config.architectures`, when present, takes precedence over the root's
+architecture, as in that converter. Known unsupported architectures are refused
+before cloning, installing dependencies, converting or quantizing, with a
+`--llama-cpp <dir>` hint. Malformed metadata has a separate diagnostic; metadata
+reads are limited to 1 MiB. An adapter is checked after its temporary merge, and
+that temporary directory is cleaned up on refusal.
+
+Explicit `--llama-cpp`, `LLAMA_CPP_PATH` and cached checkouts can be newer than the
+default pin. Soup probes their own `--print-supported-models` output (TEXT group,
+including stderr), with a 15-second timeout. A failed or unrecognized probe is
+inconclusive: conversion remains the final check, without applying the default
+pin's capability set to that checkout. No runtime network lookup is added.
+
+The shared pin remains `b5270`; this diagnostic does not enable Qwen3.5 export on
+that version. A compatible selected converter may need additional handling such
+as the MTP boundary tracked in [#1912](https://github.com/MakazhanAlpamys/Soup/issues/1912).
+
+To regenerate capabilities when changing the pin, obtain the unmodified
+`convert_hf_to_gguf.py` from its immutable upstream commit, then run:
+
+```bash
+python scripts/gen_llama_cpp_capabilities.py --converter /path/to/convert_hf_to_gguf.py \
+  --tag b5270 --commit 3bf785f3efa89ed28294fbf73054558a2b034bfb
+```
+
+The generated `src/soup_cli/utils/llama_cpp_capabilities.json` records the tag,
+commit, source URL, SHA-256 and Git blob identity. The generator parses registered
+classes and inherited model kinds without importing or executing upstream code.
+The pin/data guard rejects a changed pin until its capabilities are regenerated.
 
 ### Building llama.cpp (required for quantized GGUF)
 
@@ -179,8 +247,8 @@ Auto-detected chat templates: `chatml`, `llama`, `mistral`, `vicuna`, `zephyr` (
 
 `soup export` integrates with Soup's local artifact registry and deployment workflows:
 
-- **Deploying on export (`--deploy`)**: `--deploy ollama` is supported for GGUF-family formats (`gguf`, `gguf-ud`, `bitnet`, `tq1_0`). For non-GGUF formats (`onnx`, `tensorrt`, `awq`, `gptq`, `torchao`), `--deploy` fails fast with an informative error because Ollama cannot load non-GGUF weight files. Use `--deploy-name` to assign a custom model name in Ollama.
-- **Registering exports (`--registry-id`)**: Pass `--registry-id <id>` to record and attach exported artifacts to a local registry entry across all export formats (`gguf`, `gguf-ud`, `bitnet`, `tq1_0`, `onnx`, `tensorrt`, `awq`, `gptq`, `torchao`). When an export produces a directory (such as multi-shard safetensors, ONNX data, or TensorRT engine files in `<output>/engine/*.engine`), all produced weight and engine files are discovered and attached to the registry entry.
+- **Deploying on export (`--deploy`)**: `--deploy ollama` is supported for GGUF-family formats (`gguf`, `gguf-ud`, `bitnet`, `tq1_0`). For non-GGUF formats (`onnx`, `tensorrt`, `torchao`), `--deploy` fails fast with an informative error because Ollama cannot load non-GGUF weight files. Use `--deploy-name` to assign a custom model name in Ollama.
+- **Registering exports (`--registry-id`)**: Pass `--registry-id <id>` to record and attach exported artifacts to a local registry entry across all export formats (`gguf`, `gguf-ud`, `bitnet`, `tq1_0`, `onnx`, `tensorrt`, `torchao`). When an export produces a directory (such as multi-shard safetensors, ONNX data, or TensorRT engine files in `<output>/engine/*.engine`), all produced weight and engine files are discovered and attached to the registry entry.
 
 
 ## Batch Inference
@@ -380,6 +448,10 @@ soup serve --model ./output --backend sglang
 soup serve --model ./output --backend sglang --tensor-parallel 2
 ```
 
+The backend needs SGLang 0.5.1 or later, which the `[sglang]` extra installs: older
+releases refuse to start an engine with a LoRA adapter unless its radix cache is turned
+off, and Soup leaves it on.
+
 Like the transformers and vLLM backends, the SGLang backend applies the
 **model's own chat template** via the same shared prompt builder (falling back
 to a generic `User:` / `Assistant:` prompt for template-less models). When the
@@ -390,6 +462,15 @@ still sent as a string and tokenized by the engine as before. `finish_reason`
 reports `"length"` when a response hits `max_tokens` and `"stop"` otherwise, so
 a client doing continue-on-length can tell a truncated answer from a completed
 one (#360).
+
+A LoRA adapter passed as `--model` is served on its base model (read from
+`adapter_config.json`, or `--base`), with the adapter registered in the engine
+under the name `adapter`. SGLang applies an adapter only to the requests that
+name it and runs every other request on the base weights, so the backend names
+it in every request, streaming or not. **This changed:** the adapter used to be
+registered but never named, so every answer came from the base model while the
+response reported the adapter's name (#1724). A full model's requests name no
+adapter.
 
 It also honours `--trust-remote-code` like every other backend. **This changed:**
 the SGLang runtime and its tokenizer previously loaded with `trust_remote_code`
@@ -526,6 +607,17 @@ curl -X POST http://localhost:8000/v1/adapters/deactivate
 # List loaded adapters with active flag
 curl http://localhost:8000/v1/adapters
 # → {"adapters": [{"name": "chat", "active": true}, ...], "active": "chat"}
+```
+
+A server started with `--tool-auth-token` requires that token on all three adapter
+routes, loopback included, and answers 401 without it. A non-loopback bind always has
+one, since `soup serve` refuses to start there without it:
+
+```bash
+soup serve --model base-model --adapters chat=./chat-adapter --host 0.0.0.0 --tool-auth-token "$TOKEN"
+
+curl -X POST -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8000/v1/adapters/activate/chat
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8000/v1/adapters
 ```
 
 Names are validated against `^[a-zA-Z0-9][a-zA-Z0-9-]*$`; activate/deactivate calls are thread-safe behind a lock. Activate/deactivate also check the `Host` and `Origin` headers (see [Server-Side Tool Endpoints](#server-side-tool-endpoints)).
@@ -699,6 +791,16 @@ bypass the limit.
 
 **Interactive API docs are loopback-only.** `/openapi.json`, `/docs`, `/docs/oauth2-redirect` and `/redoc` serve on a loopback bind and are **absent** (404) on any other, including `soup ui --public`. This is deliberate rather than incidental: the schema exposes no run data, configuration or logs, but it does describe every route, parameter and request/response shape, and on a LAN bind that is free reconnaissance. Gating them behind the token instead was rejected — `/docs` is a browser navigation and Swagger cannot attach a Bearer header to it, so gating would break the page for a developer while leaving `/openapi.json` readable by any HTTP client. If you need the schema while bound publicly, read it from a loopback instance of the same version.
 
+**Host names on a loopback bind (#1829).** Use the bound host or `localhost`,
+`127.0.0.1` or `[::1]`, with the bound port. An omitted port means HTTP port 80;
+on any other port it must be included. Any other name or port gets
+`403 {"detail": "Host not allowed"}` before authentication, body reads or routes.
+This includes a proxy that rewrites `Host`, an SSH tunnel whose local port differs
+from the server's, or a custom DNS name. Missing, malformed or duplicate `Host`
+headers are also refused. These refusals carry the same security headers as other
+UI responses, including on the interactive docs paths. `--public` and other
+non-loopback binds keep the Bearer gate and do not apply this Host allow-list.
+
 ```bash
 # Custom port, don't auto-open browser
 soup ui --port 8080 --no-browser
@@ -723,7 +825,7 @@ soup quantize ./out --to gguf --bits 4
 soup quantize ./out --to onnx -o ./out-onnx
 ```
 
-Prints the equivalent `soup export …` invocation (escaped via `shlex.quote`) for copy-paste. Intentionally does NOT in-process call `soup export` — Typer commands aren't safe to re-enter. `--to awq` and `--to gptq` still print their command, followed by a notice that the two formats are deprecated and will be removed in Soup v0.77.
+Prints the equivalent `soup export …` invocation (escaped via `shlex.quote`) for copy-paste. Intentionally does NOT in-process call `soup export` — Typer commands aren't safe to re-enter.
 
 
 ## Llama.cpp Proxy
@@ -823,7 +925,7 @@ anthropic_payload = to_anthropic({
 })
 ```
 
-Multiple `system` messages join with `\n\n`. `tool` role with structured (list) content is concatenated into a single `tool_result` text block, never silently dropped. `max_tokens` capped at 16384, `temperature` bounded `[0.0, 2.0]`. Live `/v1/messages` endpoint inside `soup serve` lands in v0.45.1.
+Multiple `system` messages join with `\n\n`. `tool` role with structured (list) content is concatenated into a single `tool_result` text block, never silently dropped. `max_tokens` capped at 16384, `temperature` bounded `[0.0, 2.0]`. `soup serve` exposes this converter as a live `POST /v1/messages` endpoint on both the transformers and vLLM backends; with `"stream": true` it answers in the Anthropic event shape.
 
 
 ## Server-Side Tools
@@ -883,7 +985,11 @@ Three POST routes are now available on `soup serve`:
 
 - **`POST /v1/tools/python`** — runs caller-supplied Python code in an isolated
   sub-process. Bounded by 512 MB memory, 5-second wall-clock timeout, and a
-  single-worker concurrency cap.
+  cap of four concurrent runs (shared with the code-execution rewards). Like `/v1/tools/bash`, it runs the code only under
+  OS-level isolation: on Linux with Python 3.12+ when `os.unshare` creates new user,
+  network and PID namespaces for the run, and on macOS when `sandbox-exec` is on `PATH`.
+  Anywhere else it answers HTTP 501 without running the code, including on Windows, on
+  Linux with Python 3.11, and on a Linux host or container that refuses those namespaces.
 - **`POST /v1/tools/web_search`** — searches the web and returns domain-filtered results
   as `[{url, title, snippet}]` with snippets sanitized (null bytes stripped).
   Deny-by-default via `WebSearchConfig.domain_allowlist`.
@@ -900,7 +1006,10 @@ Three POST routes are now available on `soup serve`:
 
 Tool routes, `/v1/thumbs` and adapter activate/deactivate accept requests only when the
 `Host` header names the bound address (any loopback name for a loopback bind) and any
-`Origin` header names the same; otherwise they answer 421 or 403.
+`Origin` header names the same; otherwise they answer 421 or 403. That check runs first.
+The tool routes and all three adapter routes (`GET /v1/adapters`, activate, deactivate)
+then also require `Authorization: Bearer <token>` whenever `--tool-auth-token` is set,
+on loopback too, and answer 401 without it.
 
 The generation routes (`/v1/chat/completions`, `/v1/messages`) and the adapter listing
 (`GET /v1/adapters`) carry the narrower half of that check: a request whose `Origin` names

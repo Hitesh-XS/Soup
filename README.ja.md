@@ -1,4 +1,4 @@
-<!-- synced-from: README.md sha256:fa009c2fcc2c94ea06e25ea8620c2fbed9bfb8ac6611bf71a2669a06f7c50b46 -->
+<!-- synced-from: README.md sha256:b10e7bad5b4287de70b59bd0776c162f21da7e7cc0e2eda004dfdfc2bcc7fd24 -->
 <p align="center">🌍 <a href="README.md">English</a> | <a href="README.tr.md">Türkçe</a> | <a href="README.ar.md">العربية</a> | <strong>日本語</strong> | <a href="README.zh.md">中文</a></p>
 
 <p align="center">
@@ -27,7 +27,7 @@
 <p align="center">
   <a href="https://pypi.org/project/soup-cli/"><img src="https://img.shields.io/pypi/v/soup-cli?color=blue" alt="PyPI"></a>
   <a href="https://pepy.tech/project/soup-cli"><img src="https://img.shields.io/pepy/dt/soup-cli?color=blue" alt="ダウンロード数"></a>
-  <img src="https://img.shields.io/badge/python-3.10--3.12-blue" alt="Python 3.10-3.12">
+  <img src="https://img.shields.io/badge/python-3.11--3.13-blue" alt="Python 3.11-3.13">
   <img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="Apache-2.0 ライセンス">
   <a href="https://github.com/MakazhanAlpamys/Soup/actions"><img src="https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/MakazhanAlpamys/65fdc943f85f3b2c46ecddb415c2b779/raw/soup_tests.json" alt="テスト"></a>
   <a href="https://github.com/MakazhanAlpamys/Soup/actions"><img src="https://github.com/MakazhanAlpamys/Soup/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -135,10 +135,8 @@ LLM の学習は、今でも骨の折れる作業です。経験豊富なチー�
   使わなかった最も速い実行より 2.9x 速くデコードできました）。`soup ab` は、分散に頑健な両側検定を実行します。
   `soup adapters sign --backend sigstore` と `soup attest emit --sign sigstore` は、Sigstore のキーレス OIDC で
   署名します（`pip install "soup-cli[sigstore]"`）。
-- **非推奨:** `soup export --format awq` と `--format gptq` は v0.77 で削除されます。どちらの
-  上流プロジェクトもアーカイブ済みで、どちらの extra も `[train]` と一緒にはインストールできません。
 
-> Python は **3.10–3.12** のみ対応です。3.13 以降では、pip がテストされていない PyTorch の wheel を解決し、
+> Python は **3.11–3.13** のみ対応です。3.14 以降では、pip がテストされていない PyTorch の wheel を解決し、
 > Soup が動き出す前にネイティブ拡張の中でクラッシュしていました。
 
 過去のハイライトは [GitHub Releases](https://github.com/MakazhanAlpamys/Soup/releases) ページにあります。
@@ -217,7 +215,7 @@ soup merge  --adapter ./output                              # LoRA をベース�
 soup export --model ./output --format gguf --quant q4_k_m   # Ollama / llama.cpp 向けの GGUF
 ```
 
-その他のエクスポート先（ONNX、TensorRT、AWQ、GPTQ、BitNet）とデプロイのオプションは、
+その他のエクスポート先（ONNX、TensorRT、BitNet）とデプロイのオプションは、
 [`docs/serving-and-export.md`](docs/serving-and-export.md) にあります。
 
 ## Web UI
@@ -295,7 +293,7 @@ Alpaca、ShareGPT、ChatML、選好ペア（DPO / ORPO / SimPO / IPO / KTO）、
 埋め込み、RAFT など — すべて JSONL、JSON、CSV、Parquet、TXT から自動検出されるため、ほとんどの場合は
 `data.train` をファイルに向けるだけで、他は何も変わりません。各形式の実例つきスキーマと、データパイプライン
 （リモート URI、ストリーミング、シャーディング、インターリーブ、語彙拡張、ドキュメント取り込み）は、
-[`docs/data.md`](docs/data.md#data-formats) にあります。
+[`docs/data.md`](docs/data.md#data-formats) にあり、[Sesame CSM のネイティブ音声学習](docs/training.md#native-sesame-csm)は別途説明されています。
 
 ## よく使うコマンド
 
@@ -345,8 +343,8 @@ docker compose up   # またはローカルでビルド
 
 ## 動作要件
 
-- Python 3.10、3.11、または 3.12（CI がテストしているバージョンです。PyTorch スタックがまだ検証されて
-  いないため、3.13 以降は未サポートです）
+- Python 3.11、3.12、または 3.13（CI がテストしているバージョンです。PyTorch スタックがまだ検証されて
+  いないため、3.14 以降は未サポートです）
 - CUDA 対応 GPU（推奨）、Apple Silicon（MPS）、または CPU（実験的 — 非常に遅い）
 - QLoRA で 7B モデルを扱うには 8 GB 以上の VRAM
 
@@ -489,4 +487,4 @@ Soup に関するあらゆる件の正しい連絡先です。**makazanalpamys@g
 
 ## ライセンス
 
-[Apache-2.0](LICENSE)。Copyright © Soup コントリビューター。
+[Apache-2.0](LICENSE)。Copyright 2026 Makazhan Alpamys and the Soup contributors。Soup またはその改変コピーを再配布する場合は、ライセンスの第4条と第6条が適用されます。コピーごとに `LICENSE` と `NOTICE` を保持し、変更したファイルにその旨を明記し、作品の出所を述べる範囲を超えて Soup の名称を使用しないでください。
