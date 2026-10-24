@@ -572,7 +572,6 @@ def plan_lambda_run(
         stub_text=stub_text,
         run_command=f"python {stub_path}",
         local_train_inputs=tuple(local_train_inputs),
-        run_command=f"python -I {stub_path}",
     )
 
 
